@@ -35,6 +35,8 @@ include (
         'forge:forge-api',
         'nukkit',
         'nukkit:loader',
+        'powernukkitx',
+        'powernukkitx:loader',
         'sponge',
         'sponge:loader',
         'sponge:sponge-service',

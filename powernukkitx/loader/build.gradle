@@ -1,0 +1,33 @@
+plugins {
+    alias(libs.plugins.shadow)
+}
+
+repositories {
+    maven { url 'https://repo.opencollab.dev/main/' }
+    maven { url 'https://jitpack.io' }
+}
+
+dependencies {
+    compileOnly 'com.github.PowerNukkitX:PowerNukkitX:snapshot'
+
+    implementation project(':api')
+    implementation project(':common:loader-utils')
+}
+
+processResources {
+    filesMatching('plugin.yml') {
+        expand 'pluginVersion': project.ext.fullVersion
+    }
+}
+
+shadowJar {
+    archiveFileName = "LuckPerms-PowerNukkitX-${project.ext.fullVersion}.jar"
+
+    from {
+        project(':powernukkitx').tasks.shadowJar.archiveFile
+    }
+}
+
+artifacts {
+    archives shadowJar
+}
