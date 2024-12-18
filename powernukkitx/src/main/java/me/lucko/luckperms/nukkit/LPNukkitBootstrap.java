@@ -44,6 +44,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
+import net.luckperms.api.platform.Platform.Type;
 
 /**
  * Bootstrap plugin for LuckPerms running on Nukkit.
@@ -171,7 +172,7 @@ public class LPNukkitBootstrap implements LuckPermsBootstrap, LoaderBootstrap, B
 
     @Override
     public Platform.Type getType() {
-        return Platform.Type.NUKKIT;
+        return Type.POWERNUKKITX;
     }
 
     @Override

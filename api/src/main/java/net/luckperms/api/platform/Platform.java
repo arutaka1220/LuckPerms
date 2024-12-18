@@ -74,6 +74,7 @@ public interface Platform {
         BUNGEECORD("BungeeCord"),
         SPONGE("Sponge"),
         NUKKIT("Nukkit"),
+        POWERNUKKITX("PowerNukkitX"),
         VELOCITY("Velocity"),
         FABRIC("Fabric"),
         NEOFORGE("NeoForge"),
