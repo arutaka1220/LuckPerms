@@ -49,75 +49,139 @@ import java.util.UUID;
 
 public class NukkitConnectionListener extends AbstractConnectionListener implements Listener {
     private final LPNukkitPlugin plugin;
-
+    
     private final Set<UUID> deniedAsyncLogin = Collections.synchronizedSet(new HashSet<>());
     private final Set<UUID> deniedLogin = Collections.synchronizedSet(new HashSet<>());
-
+    
     public NukkitConnectionListener(LPNukkitPlugin plugin) {
         super(plugin);
         this.plugin = plugin;
     }
-
+    
     @EventHandler(priority = EventPriority.LOWEST)
+    public void onPlayerPreLogin(PlayerLoginEvent e) {
+        /* Called when the player first attempts a connection with the server.
+           Listening on LOW priority to allow plugins to modify username / UUID data here. (auth plugins)
+           Also, give other plugins a chance to cancel the event. */
+        
+        Player player = e.getPlayer();
+        UUID uuid = player.getUniqueId();
+        String name = player.getName();
+        
+        if (this.plugin.getConfiguration().get(ConfigKeys.DEBUG_LOGINS)) {
+            this.plugin.getLogger().info("Processing pre-login for " + uuid + " - " + name);
+        }
+        
+//        if (!e.getKickMessage().isEmpty()) {
+//            // another plugin has disallowed the login.
+//            this.plugin.getLogger().info("Another plugin has cancelled the connection for " + uuid + " - " + name + ". No permissions data will be loaded.");
+//            this.deniedAsyncLogin.add(uuid);
+//            return;
+//        }
+
+        /* Actually process the login for the connection.
+           We do this here to delay the login until the data is ready.
+           If the login gets cancelled later on, then this will be cleaned up.
+
+           This includes:
+           - loading uuid data
+           - loading permissions
+           - creating a user instance in the UserManager for this connection.
+           - setting up cached data. */
+        try {
+            User user = loadUser(uuid, name);
+            recordConnection(uuid);
+            this.plugin.getEventDispatcher().dispatchPlayerLoginProcess(uuid, name, user);
+        } catch (Exception ex) {
+            this.plugin.getLogger().severe("Exception occurred whilst loading data for " + uuid + " - " + name, ex);
+            
+            // deny the connection
+            this.deniedAsyncLogin.add(uuid);
+            
+            Component reason = TranslationManager.render(Message.LOADING_DATABASE_ERROR.build());
+            player.kick(LegacyComponentSerializer.legacySection().serialize(reason), false);
+            this.plugin.getEventDispatcher().dispatchPlayerLoginProcess(uuid, name, null);
+        }
+    }
+    
+    @EventHandler(priority = EventPriority.MONITOR)
+    public void onPlayerPreLoginMonitor(PlayerLoginEvent e) {
+        /* Listen to see if the event was cancelled after we initially handled the connection
+           If the connection was cancelled here, we need to do something to clean up the data that was loaded. */
+        
+        Player player = e.getPlayer();
+        UUID uuid = player.getUniqueId();
+        
+        // Check to see if this connection was denied at LOW.
+        if (this.deniedAsyncLogin.remove(uuid)) {
+            // their data was never loaded at LOW priority, now check to see if they have been magically allowed since then.
+            
+            // This is a problem, as they were denied at low priority, but are now being allowed.
+            this.plugin.getLogger().severe("Player connection was re-allowed for " + uuid);
+            player.kick("", false);
+        }
+    }
+    
+    @EventHandler(priority = EventPriority.LOW)
     public void onPlayerLogin(PlayerLoginEvent e) {
         /* Called when the player starts logging into the server.
            At this point, the users data should be present and loaded. */
-
+        
         final Player player = e.getPlayer();
-
+        
         if (this.plugin.getConfiguration().get(ConfigKeys.DEBUG_LOGINS)) {
             this.plugin.getLogger().info("Processing login for " + player.getUniqueId() + " - " + player.getName());
         }
-
+        
         final User user = this.plugin.getUserManager().getIfLoaded(player.getUniqueId());
-
+        
         /* User instance is null for whatever reason. Could be that it was unloaded between asyncpre and now. */
         if (user == null) {
             this.deniedLogin.add(player.getUniqueId());
-
+            
             if (!getUniqueConnections().contains(player.getUniqueId())) {
                 this.plugin.getLogger().warn("User " + player.getUniqueId() + " - " + player.getName() +
-                        " doesn't have data pre-loaded, they have never been processed during pre-login in this session." +
-                        " - denying login.");
+                    " doesn't have data pre-loaded, they have never been processed during pre-login in this session." +
+                    " - denying login.");
             } else {
                 this.plugin.getLogger().warn("User " + player.getUniqueId() + " - " + player.getName() +
-                        " doesn't currently have data pre-loaded, but they have been processed before in this session." +
-                        " - denying login.");
+                    " doesn't currently have data pre-loaded, but they have been processed before in this session." +
+                    " - denying login.");
             }
-
+            
             e.setCancelled();
             Component reason = TranslationManager.render(Message.LOADING_STATE_ERROR.build());
             e.setKickMessage(LegacyComponentSerializer.legacySection().serialize(reason));
             return;
         }
-
+        
         // User instance is there, now we can inject our custom Permissible into the player.
         // Care should be taken at this stage to ensure that async tasks which manipulate nukkit data check that the player is still online.
         try {
             // Make a new permissible for the user
             LuckPermsPermissible lpPermissible = new LuckPermsPermissible(player, user, this.plugin);
-
+            
             // Inject into the player
             PermissibleInjector.inject(player, lpPermissible);
-
+            
         } catch (Throwable t) {
             this.plugin.getLogger().warn("Exception thrown when setting up permissions for " +
-                    player.getUniqueId() + " - " + player.getName() + " - denying login.", t);
-
+                player.getUniqueId() + " - " + player.getName() + " - denying login.", t);
+            
             e.setCancelled();
             Component reason = TranslationManager.render(Message.LOADING_SETUP_ERROR.build());
             e.setKickMessage(LegacyComponentSerializer.legacySection().serialize(reason));
             return;
         }
-
+        
         this.plugin.getContextManager().signalContextUpdate(player);
     }
-
+    
     @EventHandler(priority = EventPriority.MONITOR)
     public void onPlayerLoginMonitor(PlayerLoginEvent e) {
         /* Listen to see if the event was cancelled after we initially handled the login
            If the connection was cancelled here, we need to do something to clean up the data that was loaded. */
-
+        
         // Check to see if this connection was denied at LOW. Even if it was denied at LOW, their data will still be present.
         if (this.deniedLogin.remove(e.getPlayer().getUniqueId())) {
             // This is a problem, as they were denied at low priority, but are now being allowed.
@@ -127,19 +191,19 @@ public class NukkitConnectionListener extends AbstractConnectionListener impleme
             }
         }
     }
-
+    
     // Wait until the last priority to unload, so plugins can still perform permission checks on this event
     @EventHandler(priority = EventPriority.MONITOR)
     public void onPlayerQuit(PlayerQuitEvent e) {
         final Player player = e.getPlayer();
-
+        
         // https://github.com/LuckPerms/LuckPerms/issues/2269
         if (player.getUniqueId() == null) {
             return;
         }
-
+        
         handleDisconnect(player.getUniqueId());
-
+        
         // perform unhooking from nukkit objects 1 tick later.
         // this allows plugins listening after us on MONITOR to still have intact permissions data
         this.plugin.getBootstrap().getServer().getScheduler().scheduleDelayedTask(this.plugin.getLoader(), () -> {
@@ -148,17 +212,17 @@ public class NukkitConnectionListener extends AbstractConnectionListener impleme
                 PermissibleInjector.uninject(player, true);
             } catch (Exception ex) {
                 this.plugin.getLogger().severe("Exception thrown when unloading permissions from " +
-                        player.getUniqueId() + " - " + player.getName(), ex);
+                    player.getUniqueId() + " - " + player.getName(), ex);
             }
-
+            
             // Handle auto op
             if (this.plugin.getConfiguration().get(ConfigKeys.AUTO_OP)) {
                 player.setOp(false);
             }
-
+            
             // remove their contexts cache
             this.plugin.getContextManager().onPlayerQuit(player);
         }, 1, true);
     }
-
+    
 }
